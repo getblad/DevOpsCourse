@@ -114,7 +114,7 @@ jobs:
               --scopes=https://www.googleapis.com/auth/cloud-platform \
               --metadata=startup-script='#! /bin/bash
                 apt-get update
-                apt-get install -y docker.io docker-compose
+                apt-get install -y docker.io docker-compose-plugin
               '
           fi
 
@@ -154,9 +154,9 @@ jobs:
         run: |
           gcloud compute ssh $VM_NAME --zone=$ZONE --command "
           cd /home/$(whoami) &&
-          sudo docker-compose pull &&
-          sudo docker-compose down || true &&
-          sudo docker-compose up -d
+          sudo docker compose pull &&
+          sudo docker compose down || true &&
+          sudo docker compose up -d
           "
 
       - name: Health check & rollback on failure
@@ -164,7 +164,7 @@ jobs:
           gcloud compute ssh $VM_NAME --zone=$ZONE --strict-host-key-checking=no --command "
             if ! curl --fail http://localhost/healthz; then
               echo '❌ Healthcheck failed, rolling back…'
-              sudo docker-compose down
+              sudo docker compose down
               exit 1
             fi
           "
