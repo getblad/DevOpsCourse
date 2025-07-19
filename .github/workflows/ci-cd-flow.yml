@@ -126,6 +126,12 @@ jobs:
               --target-tags http-server,https-server \
               --description="Allow HTTP and HTTPS traffic"
           fi
+
+      - name: Authenticate Docker on VM to Artifact Registry
+        run: |
+          gcloud compute ssh $VM_NAME --zone=$ZONE --command "
+          gcloud auth configure-docker ${REGION}-docker.pkg.dev
+          "
       - name: Render docker-compose.yaml
         run: |
           envsubst < docker-compose.yaml.tpl > docker-compose.yaml
