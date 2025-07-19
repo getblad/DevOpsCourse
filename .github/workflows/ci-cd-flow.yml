@@ -131,14 +131,12 @@ jobs:
 
       - name: Copy docker-compose.yaml to VM
         run: |
-          gcloud compute scp docker-compose.yaml \
-            $VM_NAME:/home/$USER/docker-compose.yaml \
-            --zone=$ZONE
+          gcloud compute scp $GITHUB_WORKSPACE/docker-compose.yaml $VM_NAME:/home/$(whoami)/docker-compose.yaml --zone=$ZONE
 
       - name: Deploy with docker-compose
         run: |
           gcloud compute ssh $VM_NAME --zone=$ZONE --strict-host-key-checking=no --command "
-            cd /home/$USER
+            cd /home/$(whoami)
             docker-compose pull
             docker-compose down || true
             docker-compose up -d
