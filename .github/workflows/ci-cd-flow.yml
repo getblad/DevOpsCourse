@@ -134,13 +134,14 @@ jobs:
         run: |
           gcloud compute scp $GITHUB_WORKSPACE/docker-compose.yaml $VM_NAME:/home/$(whoami)/docker-compose.yaml --zone=$ZONE
 
-      - name: Deploy with docker-compose
+
+      - name: Deploy application on VM
         run: |
-          gcloud compute ssh $VM_NAME --zone=$ZONE --strict-host-key-checking=no --command "
-            cd /home/$(whoami)
-            docker-compose pull
-            docker-compose down || true
-            docker-compose up -d
+          gcloud compute ssh $VM_NAME --zone=$ZONE --command "
+          cd /home/$(whoami) &&
+          sudo docker-compose pull &&
+          sudo docker-compose down || true &&
+          sudo docker-compose up -d
           "
 
       - name: Health check & rollback on failure
