@@ -1,0 +1,111 @@
+name: CI/CD Pipeline (manual trigger)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      SERVICE_ACCOUNT: ${{ secrets.SERVICE_ACCOUNT_EMAIL }}
+      PROJECT_ID: ${{ secrets.GCP_PROJECT }}
+      REGION: ${{ secrets.GCP_REGION }}
+      ZONE: ${{ secrets.GCP_ZONE }}
+      VM_NAME: ${{ secrets.GCP_VM_NAME }}
+      MACHINE_TYPE: e2-medium
+      DISK_SIZE: 30GB
+      IMAGE_FAMILY: debian-12
+      IMAGE_PROJECT: debian-cloud
+      REPOSITORY: my-app
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Authenticate to GCP
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+      with:
+        project_id: ${{ secrets.GCP_PROJECT }}
+        install_components: "beta"
+
+    - name: Create VM if not exists
+      run: |
+        if ! gcloud compute instances describe $VM_NAME --zone=$ZONE; then
+          echo "VM $VM_NAME does not exist. Creating..."
+          gcloud compute instances create $VM_NAME \
+            --zone=$ZONE \
+            --machine-type=$MACHINE_TYPE \
+            --boot-disk-size=$DISK_SIZE \
+            --image-family=$IMAGE_FAMILY \
+            --image-project=$IMAGE_PROJECT \
+            --tags=http-server,https-server \
+            --service-account=$SERVICE_ACCOUNT \
+            --scopes=https://www.googleapis.com/auth/cloud-platform
+        else
+          echo "VM $VM_NAME already exists."
+        fi
+
+    - name: Open firewall for HTTP/HTTPS
+      run: |
+        gcloud compute firewall-rules create allow-http-https \
+          --allow tcp:80,tcp:443 \
+          --target-tags http-server,https-server \
+          --description="Allow HTTP and HTTPS traffic" || echo "Firewall rule already exists"
+
+    - name: Configure Docker to use Artifact Registry
+      run: |
+        gcloud auth configure-docker ${REGION}-docker.pkg.dev
+
+    - name: Build & push Docker images
+      run: |
+        FRONTEND_IMAGE=${REGION}-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/frontend:latest
+        BACKEND_IMAGE=${REGION}-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/backend:latest
+
+        docker build -t $FRONTEND_IMAGE ./frontend
+        docker build -t $BACKEND_IMAGE ./backend
+
+        docker push $FRONTEND_IMAGE
+        docker push $BACKEND_IMAGE
+
+    - name: Install Docker & Compose on VM
+      run: |
+        gcloud compute ssh $VM_NAME --zone=$ZONE --command "
+          sudo apt-get update &&
+          sudo apt-get install -y docker.io docker-compose
+        "
+    - name: Authenticate Docker on VM to Artifact Registry
+      run: |
+        gcloud compute ssh $VM_NAME --zone=$ZONE --command "
+        gcloud auth configure-docker ${REGION}-docker.pkg.dev
+        "
+
+    - name: Copy docker-compose.yaml to VM
+      run: |
+        gcloud compute scp $GITHUB_WORKSPACE/docker-compose.yaml $VM_NAME:/home/$(whoami)/docker-compose.yaml --zone=$ZONE
+
+    - name: Copy Docker config for root on VM
+      run: |
+        gcloud compute ssh $VM_NAME --zone=$ZONE --command "
+        sudo mkdir -p /root/.docker &&
+        sudo cp /home/$(whoami)/.docker/config.json /root/.docker/config.json
+        "
+
+    - name: Deploy application on VM
+      run: |
+        gcloud compute ssh $VM_NAME --zone=$ZONE --command "
+        cd /home/$(whoami) &&
+        sudo docker-compose pull &&
+        sudo docker-compose down || true &&
+        sudo docker-compose up -d
+        "
+
+
+    - name: Stop VM
+      run: |
+        gcloud compute instances stop $VM_NAME --zone=$ZONE
