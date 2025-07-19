@@ -1,5 +1,5 @@
 # .github/workflows/ci-cd-pipeline.yml
-name: CI/CD Pipeline (manual trigger)
+name: CI/CD Pipeline Modified
 
 on:
   workflow_dispatch:
