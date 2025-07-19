@@ -102,17 +102,16 @@ jobs:
 
       - name: Ensure VM exists (with baked-in startup script)
         run: |
-          if ! gcloud compute instances describe "$VM_NAME" --zone="$ZONE" >/dev/null 2>&1; then
-          echo "VM $VM_NAME does not exist. Creating…"
-          gcloud compute instances create "$VM_NAME" \
-            --zone="$ZONE" \
-            --machine-type="$MACHINE_TYPE" \
-            --boot-disk-size="$DISK_SIZE" \
-            --image-family="$IMAGE_FAMILY" \
-            --image-project="$IMAGE_PROJECT" \
-            --tags=http-server,https-server \
-            --service-account="$SERVICE_ACCOUNT_EMAIL" \
-            --scopes=https://www.googleapis.com/auth/cloud-platform
+          if ! gcloud compute instances describe $VM_NAME --zone=$ZONE >/dev/null 2>&1; then
+            gcloud compute instances create $VM_NAME \
+              --zone=$ZONE \
+              --machine-type=e2-medium \
+              --boot-disk-size=30GB \
+              --image-family=debian-12 \
+              --image-project=debian-cloud \
+              --tags=http-server,https-server \
+              --service-account=${{ env.SERVICE_ACCOUNT }} \
+              --scopes=https://www.googleapis.com/auth/cloud-platform
           else
             echo "VM $VM_NAME already exists."
           fi
