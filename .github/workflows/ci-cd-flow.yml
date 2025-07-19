@@ -90,7 +90,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Authenticate to GCP via Workload Identity
+      - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
@@ -126,6 +126,9 @@ jobs:
               --target-tags http-server,https-server \
               --description="Allow HTTP and HTTPS traffic"
           fi
+      - name: Configure Docker to use Artifact Registry
+        run: |
+          gcloud auth configure-docker ${REGION}-docker.pkg.dev
 
       - name: Authenticate Docker on VM to Artifact Registry
         run: |
@@ -140,6 +143,12 @@ jobs:
         run: |
           gcloud compute scp $GITHUB_WORKSPACE/docker-compose.yaml $VM_NAME:/home/$(whoami)/docker-compose.yaml --zone=$ZONE
 
+      - name: Copy Docker config for root on VM
+        run: |
+          gcloud compute ssh $VM_NAME --zone=$ZONE --command "
+          sudo mkdir -p /root/.docker &&
+          sudo cp /home/$(whoami)/.docker/config.json /root/.docker/config.json
+          "
 
       - name: Deploy application on VM
         run: |
