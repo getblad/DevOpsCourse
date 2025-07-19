@@ -114,7 +114,7 @@ jobs:
               --scopes=https://www.googleapis.com/auth/cloud-platform \
               --metadata=startup-script='#! /bin/bash
                 apt-get update
-                apt-get install -y docker.io docker-compose
+                apt-get install -y docker.io docker-compose-plugin
               '
           fi
 
