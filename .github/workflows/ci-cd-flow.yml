@@ -1,0 +1,155 @@
+# .github/workflows/ci-cd-pipeline.yml
+name: CI/CD Pipeline (manual trigger)
+
+on:
+  workflow_dispatch:
+
+# prevent overlapping runs on the same branch
+concurrency:
+  group: ci-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PROJECT_ID:    ${{ secrets.GCP_PROJECT }}
+  REGION:        ${{ secrets.GCP_REGION }}
+  ZONE:          ${{ secrets.GCP_ZONE }}
+  VM_NAME:       ${{ secrets.GCP_VM_NAME }}
+  REPOSITORY:    my-app
+  FRONTEND_PATH: ./frontend
+  BACKEND_PATH:  ./backend
+
+jobs:
+  build:
+    name: Build & Push Images
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP via Workload Identity
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Cache Docker build layers
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker ${REGION}-docker.pkg.dev
+
+      - name: Build & push frontend image
+        id: push-frontend
+        run: |
+          IMAGE=${REGION}-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/frontend:${{ github.sha }}
+          docker buildx build \
+            --cache-from=type=local,src=/tmp/.buildx-cache \
+            --cache-to=type=local,dest=/tmp/.buildx-cache \
+            -t $IMAGE $FRONTEND_PATH \
+            --push
+          echo "::set-output name=image::$IMAGE"
+
+      - name: Build & push backend image
+        id: push-backend
+        run: |
+          IMAGE=${REGION}-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/backend:${{ github.sha }}
+          docker buildx build \
+            --cache-from=type=local,src=/tmp/.buildx-cache \
+            --cache-to=type=local,dest=/tmp/.buildx-cache \
+            -t $IMAGE $BACKEND_PATH \
+            --push
+          echo "::set-output name=image::$IMAGE"
+
+    outputs:
+      frontend-image: ${{ steps.push-frontend.outputs.image }}
+      backend-image:  ${{ steps.push-backend.outputs.image }}
+
+
+  deploy:
+    name: Provision & Deploy
+    needs: build
+    runs-on: ubuntu-latest
+
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP via Workload Identity
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Ensure VM exists (with baked-in startup script)
+        run: |
+          if ! gcloud compute instances describe $VM_NAME --zone=$ZONE >/dev/null 2>&1; then
+            gcloud compute instances create $VM_NAME \
+              --zone=$ZONE \
+              --machine-type=e2-medium \
+              --boot-disk-size=30GB \
+              --image-family=debian-12 \
+              --image-project=debian-cloud \
+              --tags=http-server,https-server \
+              --service-account=${{ secrets.GCP_SA_EMAIL }} \
+              --scopes=https://www.googleapis.com/auth/cloud-platform \
+              --metadata=startup-script='#! /bin/bash
+                apt-get update
+                apt-get install -y docker.io docker-compose
+              '
+          fi
+
+      - name: Open HTTP/HTTPS firewall (idempotent)
+        run: |
+          if ! gcloud compute firewall-rules describe allow-http-https --quiet; then
+            gcloud compute firewall-rules create allow-http-https \
+              --allow tcp:80,tcp:443 \
+              --target-tags http-server,https-server \
+              --description="Allow HTTP and HTTPS traffic"
+          fi
+      - name: Render docker-compose.yaml
+        run: |
+          envsubst < docker-compose.yaml.tpl > docker-compose.yaml
+
+      - name: Copy docker-compose.yaml to VM
+        run: |
+          gcloud compute scp docker-compose.yaml \
+            $VM_NAME:/home/$USER/docker-compose.yaml \
+            --zone=$ZONE
+
+      - name: Deploy with docker-compose
+        run: |
+          gcloud compute ssh $VM_NAME --zone=$ZONE --strict-host-key-checking=no --command "
+            cd /home/$USER
+            docker-compose pull
+            docker-compose down || true
+            docker-compose up -d
+          "
+
+      - name: Health check & rollback on failure
+        run: |
+          gcloud compute ssh $VM_NAME --zone=$ZONE --strict-host-key-checking=no --command "
+            if ! curl --fail http://localhost/healthz; then
+              echo '❌ Healthcheck failed, rolling back…'
+              docker-compose down
+              exit 1
+            fi
+          "
