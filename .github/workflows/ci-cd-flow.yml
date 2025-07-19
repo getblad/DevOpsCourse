@@ -112,7 +112,6 @@ jobs:
               --tags=http-server,https-server \
               --service-account=${{ env.SERVICE_ACCOUNT }} \
               --scopes=https://www.googleapis.com/auth/cloud-platform \
-              '
           fi
       - name: Ensure Docker & Compose on VM
         run: |
