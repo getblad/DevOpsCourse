@@ -130,11 +130,11 @@ jobs:
         run: |
           gcloud auth configure-docker ${REGION}-docker.pkg.dev
 
-      - name: Authenticate Docker on VM to Artifact Registry
-        run: |
-          gcloud compute ssh $VM_NAME --zone=$ZONE --command "
-          gcloud auth configure-docker ${REGION}-docker.pkg.dev
-          "
+      # - name: Authenticate Docker on VM to Artifact Registry
+      #   run: |
+      #     gcloud compute ssh $VM_NAME --zone=$ZONE --command "
+      #     gcloud auth configure-docker ${REGION}-docker.pkg.dev
+      #     "
       - name: Render docker-compose.yaml
         run: |
           envsubst < docker-compose.yaml.tpl > docker-compose.yaml
@@ -154,9 +154,9 @@ jobs:
         run: |
           gcloud compute ssh $VM_NAME --zone=$ZONE --command "
           cd /home/$(whoami) &&
-          sudo docker-compose pull &&
-          sudo docker-compose down || true &&
-          sudo docker-compose up -d
+          sudo docker compose pull &&
+          sudo docker compose down || true &&
+          sudo docker compose up -d
           "
 
       - name: Health check & rollback on failure
@@ -164,7 +164,7 @@ jobs:
           gcloud compute ssh $VM_NAME --zone=$ZONE --strict-host-key-checking=no --command "
             if ! curl --fail http://localhost/healthz; then
               echo '❌ Healthcheck failed, rolling back…'
-              docker-compose down
+              sudo docker compose down
               exit 1
             fi
           "
